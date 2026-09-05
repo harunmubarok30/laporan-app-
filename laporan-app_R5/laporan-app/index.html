@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Laporan Progress Proyek</title>
+<link rel="stylesheet" href="style.css">
+
+<!-- idb-keyval dimuat blocking seperti biasa karena dibutuhkan SEGERA saat
+     halaman terbuka (untuk memuat data tersimpan). -->
+<script src="https://cdn.jsdelivr.net/npm/idb-keyval@6/dist/umd.js"></script>
+
+<!-- Library export (Word/PPT/PDF) hanya dipakai saat tombol Export diklik,
+     jadi aman dimuat async dengan CDN cadangan: kalau CDN utama gagal/lambat,
+     otomatis coba CDN berikutnya sebelum benar-benar dianggap gagal.
+     PENTING: docx wajib memuat "build/index.umd.js" — bukan "build/index.js"
+     (file itu tidak ada di paket npm-nya / bukan bundle UMD untuk browser). -->
+<script>
+  function loadScriptWithFallback(urls){
+    var i = 0;
+    function tryNext(){
+      if(i >= urls.length) return;
+      var url = urls[i++];
+      var s = document.createElement("script");
+      s.src = url;
+      s.onerror = tryNext;
+      document.head.appendChild(s);
+    }
+    tryNext();
+  }
+  loadScriptWithFallback([
+    "https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js",
+    "https://unpkg.com/docx@8.5.0/build/index.umd.js"
+  ]);
+  loadScriptWithFallback([
+    "https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js",
+    "https://unpkg.com/pptxgenjs@3.12.0/dist/pptxgen.bundle.js"
+  ]);
+  loadScriptWithFallback([
+    "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js",
+    "https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"
+  ]);
+  // Dipakai oleh fitur "Gabung Dokumen": pdf-lib untuk menggabungkan
+  // halaman PDF/gambar, mammoth untuk membaca teks dari file Word (.docx).
+  loadScriptWithFallback([
+    "https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js",
+    "https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"
+  ]);
+  loadScriptWithFallback([
+    "https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js",
+    "https://unpkg.com/mammoth@1.8.0/mammoth.browser.min.js"
+  ]);
+  // JSZip dipakai untuk membongkar file PowerPoint (.pptx), karena
+  // .pptx sebenarnya adalah file ZIP berisi teks & gambar tiap slide.
+  loadScriptWithFallback([
+    "https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js",
+    "https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"
+  ]);
+</script>
+</head>
+<body>
+
+<div id="app">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <h1>📋 Laporan Proyek</h1>
+    <button id="btnNewProject" class="btn btn-primary btn-block">+ Proyek Baru</button>
+    <div id="projectList" class="project-list"></div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main">
+
+    <div id="emptyState" class="empty-state">
+      <p>Belum ada proyek dipilih.</p>
+      <p>Buat proyek baru di sidebar kiri untuk mulai membuat laporan harian, mingguan, atau bulanan.</p>
+    </div>
+
+    <div id="projectView" class="hidden">
+
+      <header class="project-header">
+        <div>
+          <h2 id="pjName"></h2>
+          <p id="pjMeta" class="muted"></p>
+        </div>
+        <button id="btnEditProject" class="btn btn-ghost">Edit Proyek</button>
+      </header>
+
+      <nav class="tabs">
+        <button class="tab-btn active" data-tab="harian">Laporan Harian</button>
+        <button class="tab-btn" data-tab="mingguan">Laporan Mingguan</button>
+        <button class="tab-btn" data-tab="bulanan">Laporan Bulanan</button>
+        <button class="tab-btn" data-tab="gabung">Gabung Dokumen</button>
+      </nav>
+
+      <!-- TAB HARIAN -->
+      <section id="tab-harian" class="tab-content active">
+        <div class="card">
+          <h3 id="entryFormTitle">Tambah Entri Harian</h3>
+          <form id="entryForm">
+            <input type="hidden" id="entryId">
+            <div class="form-row">
+              <div class="form-group">
+                <label>Judul Progress *</label>
+                <input type="text" id="fJudul" placeholder="mis. Pengecoran lantai 2" required>
+              </div>
+              <div class="form-group">
+                <label>Tanggal *</label>
+                <input type="date" id="fTanggal" required>
+              </div>
+              <div class="form-group">
+                <label>Waktu *</label>
+                <input type="time" id="fWaktu" required>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>Keterangan Pekerjaan *</label>
+              <textarea id="fKeterangan" rows="3" placeholder="Jelaskan pekerjaan yang dilakukan..." required></textarea>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label>Progress (%)</label>
+                <input type="number" id="fProgress" min="0" max="100" placeholder="0-100">
+              </div>
+              <div class="form-group">
+                <label>Cuaca</label>
+                <select id="fCuaca">
+                  <option value="">- pilih -</option>
+                  <option>Cerah</option>
+                  <option>Berawan</option>
+                  <option>Hujan Ringan</option>
+                  <option>Hujan Deras</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Tenaga Kerja (orang)</label>
+                <input type="number" id="fTenagaKerja" min="0" placeholder="jumlah pekerja">
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label>Kendala / Masalah</label>
+                <textarea id="fKendala" rows="2" placeholder="Opsional"></textarea>
+              </div>
+              <div class="form-group">
+                <label>Rencana Selanjutnya</label>
+                <textarea id="fRencana" rows="2" placeholder="Opsional"></textarea>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>Foto Dokumentasi</label>
+              <input type="file" id="fFoto" accept="image/*" multiple>
+              <div id="fotoPreview" class="foto-preview"></div>
+            </div>
+
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary">Simpan Entri</button>
+              <button type="button" id="btnCancelEdit" class="btn btn-ghost hidden">Batal Edit</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="list-header">
+          <h3>Daftar Entri Harian</h3>
+          <div>
+            <button class="btn btn-word" data-export="word" data-scope="harian">Export Word</button>
+            <button class="btn btn-ppt" data-export="ppt" data-scope="harian">Export PPT</button>
+            <button class="btn btn-pdf" data-export="pdf" data-scope="harian">Export PDF</button>
+          </div>
+        </div>
+        <div id="entryListHarian" class="entry-list"></div>
+      </section>
+
+      <!-- TAB MINGGUAN -->
+      <section id="tab-mingguan" class="tab-content">
+        <div class="card">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Dari Tanggal</label>
+              <input type="date" id="wStart">
+            </div>
+            <div class="form-group">
+              <label>Sampai Tanggal</label>
+              <input type="date" id="wEnd">
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Ringkasan Mingguan (opsional)</label>
+            <textarea id="wRingkasan" rows="3" placeholder="Ringkasan capaian minggu ini..."></textarea>
+          </div>
+        </div>
+
+        <div class="list-header">
+          <h3>Entri dalam Periode</h3>
+          <div>
+            <button class="btn btn-word" data-export="word" data-scope="mingguan">Export Word</button>
+            <button class="btn btn-ppt" data-export="ppt" data-scope="mingguan">Export PPT</button>
+            <button class="btn btn-pdf" data-export="pdf" data-scope="mingguan">Export PDF</button>
+          </div>
+        </div>
+        <div id="entryListMingguan" class="entry-list"></div>
+      </section>
+
+      <!-- TAB BULANAN -->
+      <section id="tab-bulanan" class="tab-content">
+        <div class="card">
+          <div class="form-group" style="max-width:220px">
+            <label>Bulan</label>
+            <input type="month" id="mMonth">
+          </div>
+          <div class="form-group">
+            <label>Ringkasan Bulanan (opsional)</label>
+            <textarea id="mRingkasan" rows="3" placeholder="Ringkasan capaian bulan ini..."></textarea>
+          </div>
+        </div>
+
+        <div class="list-header">
+          <h3>Entri dalam Bulan</h3>
+          <div>
+            <button class="btn btn-word" data-export="word" data-scope="bulanan">Export Word</button>
+            <button class="btn btn-ppt" data-export="ppt" data-scope="bulanan">Export PPT</button>
+            <button class="btn btn-pdf" data-export="pdf" data-scope="bulanan">Export PDF</button>
+          </div>
+        </div>
+        <div id="entryListBulanan" class="entry-list"></div>
+      </section>
+
+      <!-- TAB GABUNG DOKUMEN -->
+      <section id="tab-gabung" class="tab-content">
+        <div class="card">
+          <h3>Import Dokumen Eksternal</h3>
+          <p class="muted">
+            Upload dokumen dari luar aplikasi ini — PDF, Word (.docx), PowerPoint (.pptx),
+            atau foto (JPG/PNG/GIF/WEBP/BMP) — untuk nanti digabungkan menjadi satu file
+            laporan akhir, lengkap dengan foto/gambar yang ada di dalamnya. Urutan dokumen
+            bisa diatur dengan tombol ▲▼ di bawah.
+          </p>
+          <div class="form-group" style="max-width:360px">
+            <label>Pilih File (PDF / Word / PowerPoint / Gambar)</label>
+            <input type="file" id="fImportDocs" accept=".pdf,.doc,.docx,.ppt,.pptx,image/*" multiple>
+          </div>
+          <div id="importedDocsList" class="imported-doc-list"></div>
+        </div>
+
+        <div class="card">
+          <h3>Gabungkan Menjadi Satu Laporan</h3>
+          <div class="form-group" style="max-width:340px">
+            <label>Sertakan Laporan Otomatis Sebagai Halaman Awal (opsional)</label>
+            <select id="gabungScope">
+              <option value="">- Tidak disertakan -</option>
+              <option value="harian">Laporan Harian (semua entri)</option>
+              <option value="mingguan">Laporan Mingguan (sesuai rentang di tab Mingguan)</option>
+              <option value="bulanan">Laporan Bulanan (sesuai bulan di tab Bulanan)</option>
+            </select>
+          </div>
+          <button id="btnGabungkan" class="btn btn-pdf">🔗 Gabungkan &amp; Unduh PDF</button>
+          <p class="muted" style="margin-top:10px">
+            Catatan: gambar/foto di dalam dokumen Word &amp; PowerPoint ikut digabung, tapi
+            tata letak aslinya disederhanakan menjadi teks berurutan + gambar (bukan salinan
+            visual persis seperti file aslinya). Dokumen PDF dan foto digabung apa adanya.
+            Format lama <code>.doc</code>/<code>.ppt</code> (bukan .docx/.pptx) dan foto
+            HEIC umumnya tidak bisa dibaca otomatis oleh browser.
+          </p>
+        </div>
+
+      </section>
+
+    </div>
+  </main>
+</div>
+
+<!-- MODAL PROJECT -->
+<div id="modalProject" class="modal-overlay hidden">
+  <div class="modal">
+    <h3 id="modalProjectTitle">Proyek Baru</h3>
+    <form id="projectForm">
+      <input type="hidden" id="pId">
+      <div class="form-group">
+        <label>Nama Proyek *</label>
+        <input type="text" id="pNama" required>
+      </div>
+      <div class="form-group">
+        <label>Lokasi</label>
+        <input type="text" id="pLokasi">
+      </div>
+      <div class="form-group">
+        <label>Penanggung Jawab</label>
+        <input type="text" id="pPenanggungJawab">
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Simpan</button>
+        <button type="button" id="btnCloseModal" class="btn btn-ghost">Batal</button>
+        <button type="button" id="btnDeleteProject" class="btn btn-danger hidden" style="margin-left:auto">Hapus Proyek</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="app.js"></script>
+<script src="export.js"></script>
+<script src="combine.js"></script>
+</body>
+</html>
